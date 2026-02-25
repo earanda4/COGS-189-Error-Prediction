@@ -36,7 +36,7 @@ Data saved per run:
 SUBJECT          = 1          # Subject number
 SESSION          = 1          # Session number
 RUN              = 1          # Run number (also used as random seed)
-CYTON_IN         = False       # True = record from OpenBCI Cyton; False = dry run
+CYTON_IN         = True       # True = record from OpenBCI Cyton; False = dry run
 CYTON_BOARD_ID   = 0          # 0 = Cyton (8ch), 2 = Cyton+Daisy (16ch)
 SAMPLING_RATE    = 250        # Hz — must match board setting
 
@@ -183,7 +183,7 @@ def save_all_data(trial_metadata, eeg_trials_list, labels_list):
 # ─────────────────────────────────────────────
 #  PSYCHOPY WINDOW
 # ─────────────────────────────────────────────
-keyboard   = kb.Keyboard()
+keyboard   = kb.Keyboard(backend='event')  # 'event' backend is most stable on macOS/terminal
 win = visual.Window(
     size=[SCREEN_WIDTH, SCREEN_HEIGHT],
     fullscr=True,
@@ -311,10 +311,8 @@ labels_list     = []   # outcome label per responded trial
 # Show instructions
 instruction_text.draw()
 win.flip()
-event.waitKeys(keyList=['space', 'escape'])
-
-# Check escape at instructions
-if 'escape' in keyboard.getKeys(keyList=['escape'], clear=False):
+keys = event.waitKeys(keyList=['space', 'escape'])
+if 'escape' in keys:
     win.close()
     core.quit()
 
@@ -339,8 +337,7 @@ for i_trial, trial in enumerate(trial_sequence):
 
     # ── Stimulus onset ────────────────────────
     stim = go_stim if is_go else nogo_stim
-    keyboard.clock.reset()
-    keyboard.clearEvents()
+    event.clearEvents()   # flush any stale keypresses before stimulus onset
 
     stim.draw()
     show_photosensor(True)    # photosensor ON — marks stimulus onset in aux channel
@@ -357,26 +354,34 @@ for i_trial, trial in enumerate(trial_sequence):
     win.flip()
 
     # ── Response window ───────────────────────
-    response_rt     = None
-    press_sample    = None
-    response_onset  = core.getTime()
+    # event.waitKeys blocks until keypress OR timeout — far more reliable
+    # than a polling loop on macOS / terminal environments.
+    remaining_window = RESPONSE_WINDOW - STIM_DURATION
+    rt_clock = core.Clock()
+    response_keys = event.waitKeys(
+        maxWait=remaining_window,
+        keyList=['space', 'escape'],
+        timeStamped=rt_clock
+    )
 
-    while (core.getTime() - response_onset) < (RESPONSE_WINDOW - STIM_DURATION):
-        keys = keyboard.getKeys(keyList=['space', 'escape'])
-        for key in keys:
-            if key.name == 'escape':
-                # Emergency exit — save what we have
-                if CYTON_IN:
-                    save_all_data(trial_metadata, eeg_trials_list, labels_list)
-                    stop_event.set()
-                    board.stop_stream()
-                    board.release_session()
-                win.close()
-                core.quit()
+    response_rt  = None
+    press_sample = None
 
-            if key.name == 'space' and response_rt is None:
-                response_rt  = key.rt  # time in seconds from keyboard.clock.reset()
-                press_sample = stim_onset_sample + int(response_rt * SAMPLING_RATE) if CYTON_IN else None
+    if response_keys:
+        key_name, key_rt = response_keys[0]   # first key only
+        if key_name == 'escape':
+            if CYTON_IN:
+                save_all_data(trial_metadata, eeg_trials_list, labels_list)
+                stop_event.set()
+                board.stop_stream()
+                board.release_session()
+            win.close()
+            core.quit()
+        if key_name == 'space':
+            # key_rt from waitKeys+timeStamped is time since rt_clock creation (~0),
+            # so offset by STIM_DURATION to get RT from stimulus onset
+            response_rt  = STIM_DURATION + key_rt
+            press_sample = stim_onset_sample + int(response_rt * SAMPLING_RATE) if CYTON_IN else None
 
     # ── Classify outcome ──────────────────────
     if is_go:
