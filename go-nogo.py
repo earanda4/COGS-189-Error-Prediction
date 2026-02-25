@@ -181,17 +181,36 @@ def save_all_data(trial_metadata, eeg_trials_list, labels_list):
 
 
 # ─────────────────────────────────────────────
-#  PSYCHOPY WINDOW
+#  PSYCHOPY WINDOW  (macOS / Windows compatible)
 # ─────────────────────────────────────────────
-keyboard   = kb.Keyboard(backend='event')  # 'event' backend is most stable on macOS/terminal
+import platform
+IS_MAC = platform.system() == 'Darwin'
+
 win = visual.Window(
     size=[SCREEN_WIDTH, SCREEN_HEIGHT],
     fullscr=True,
-    allowGUI=False,
-    color=[-0.6, -0.6, -0.6],   # dark grey background
+    allowGUI=True,          # MUST be True on macOS to receive keyboard events
+    color=[-0.6, -0.6, -0.6],
     checkTiming=True,
     useRetina=False,
 )
+
+# macOS: window must be explicitly brought to front after creation,
+# otherwise the OS routes keyboard events back to the terminal.
+if IS_MAC:
+    try:
+        win.winHandle.activate()        # pyglet: raise window to foreground
+        win.winHandle.set_mouse_visible(True)
+    except Exception:
+        pass  # non-fatal if pyglet handle unavailable
+
+# iohub backend is the most reliable on macOS (uses a separate process for input).
+# Falls back to 'event' on Windows/Linux which works fine there.
+try:
+    keyboard = kb.Keyboard(backend='iohub' if IS_MAC else 'event')
+except Exception:
+    keyboard = kb.Keyboard(backend='event')   # iohub fallback if not installed
+
 ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT
 
 # ─────────────────────────────────────────────
@@ -308,6 +327,11 @@ trial_metadata  = []   # list of dicts, one per trial
 eeg_trials_list = []   # epoched EEG per responded trial
 labels_list     = []   # outcome label per responded trial
 
+# On macOS: do a blank flip immediately after window creation to force focus transfer.
+# Without this, the first event.waitKeys() can silently time out.
+win.flip()
+core.wait(0.1)
+
 # Show instructions
 instruction_text.draw()
 win.flip()
@@ -345,43 +369,62 @@ for i_trial, trial in enumerate(trial_sequence):
     win.flip()
     stim_onset_sample = current_sample_index() if CYTON_IN else None
 
-    # Brief stimulus display
-    core.wait(STIM_DURATION)
+    # ── Response window (frame-by-frame loop) ─────────────────────────────────
+    # We drive the loop with win.flip() so that the OS event queue is pumped
+    # every ~16 ms. This is far more reliable than waitKeys() on macOS because
+    # the pyglet event dispatcher only fires during flip — keypresses between
+    # flips get buffered and are always caught on the very next frame check.
+    #
+    # Timeline:
+    #   0 ms ─ stimulus appears (above)
+    #   0–250 ms ─ stimulus visible, already listening for keypress
+    #   250 ms ─ stimulus disappears, keep listening until RESPONSE_WINDOW
+    #   600 ms ─ response window closes
+    #
+    response_rt   = None
+    press_sample  = None
+    rt_clock      = core.Clock()          # starts ticking from stimulus onset
 
-    # Clear stimulus, keep photosensor off
-    show_photosensor(False)
-    draw_background()
-    win.flip()
+    n_frames_total = int(RESPONSE_WINDOW * REFRESH_RATE)
+    n_frames_stim  = int(STIM_DURATION   * REFRESH_RATE)
 
-    # ── Response window ───────────────────────
-    # event.waitKeys blocks until keypress OR timeout — far more reliable
-    # than a polling loop on macOS / terminal environments.
-    remaining_window = RESPONSE_WINDOW - STIM_DURATION
-    rt_clock = core.Clock()
-    response_keys = event.waitKeys(
-        maxWait=remaining_window,
-        keyList=['space', 'escape'],
-        timeStamped=rt_clock
-    )
+    for i_frame in range(n_frames_total):
+        # Hide stimulus after its display duration
+        if i_frame == n_frames_stim:
+            show_photosensor(False)
+            draw_background()
+            win.flip()
+            continue   # no need to redraw stim on blank frames after first blank flip
 
-    response_rt  = None
-    press_sample = None
+        if i_frame > n_frames_stim:
+            # Blank ITI frames — just flip to keep the event queue alive
+            draw_background()
+            win.flip()
+        else:
+            # Stimulus still visible — redraw each frame
+            stim.draw()
+            show_photosensor(True)
+            draw_background()
+            win.flip()
 
-    if response_keys:
-        key_name, key_rt = response_keys[0]   # first key only
-        if key_name == 'escape':
-            if CYTON_IN:
-                save_all_data(trial_metadata, eeg_trials_list, labels_list)
-                stop_event.set()
-                board.stop_stream()
-                board.release_session()
-            win.close()
-            core.quit()
-        if key_name == 'space':
-            # key_rt from waitKeys+timeStamped is time since rt_clock creation (~0),
-            # so offset by STIM_DURATION to get RT from stimulus onset
-            response_rt  = STIM_DURATION + key_rt
-            press_sample = stim_onset_sample + int(response_rt * SAMPLING_RATE) if CYTON_IN else None
+        # Check keyboard AFTER flip (event queue is freshest here)
+        keys = event.getKeys(keyList=['space', 'escape'], timeStamped=rt_clock)
+        for key_name, key_rt in keys:
+            if key_name == 'escape':
+                if CYTON_IN:
+                    save_all_data(trial_metadata, eeg_trials_list, labels_list)
+                    stop_event.set()
+                    board.stop_stream()
+                    board.release_session()
+                win.close()
+                core.quit()
+            if key_name == 'space' and response_rt is None:
+                response_rt  = key_rt   # seconds from stimulus onset
+                press_sample = stim_onset_sample + int(response_rt * SAMPLING_RATE) if CYTON_IN else None
+                break   # first press only
+
+        if response_rt is not None:
+            break   # stop looping once we have a response
 
     # ── Classify outcome ──────────────────────
     if is_go:
