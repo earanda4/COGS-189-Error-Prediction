@@ -15,35 +15,35 @@ Task Design:
 Trial outcomes saved per trial:
     - 'hit'               : Go trial, correct response
     - 'miss'              : Go trial, no response (omission error)
-    - 'commission_error'  : No-Go trial, incorrect response ← KEY TRIALS
+    - 'commission_error'  : No-Go trial, incorrect response <- KEY TRIALS
     - 'correct_rejection' : No-Go trial, correctly withheld
 
 EEG epochs are saved time-locked to the BUTTON PRESS (not stimulus onset)
-so that the pre-response window (−500 ms to 0 ms) can be extracted offline
+so that the pre-response window (-500 ms to 0 ms) can be extracted offline
 for error-vs-correct classification.
 
 Data saved per run:
-    eeg_raw.npy          - continuous raw EEG (8 ch × N samples)
+    eeg_raw.npy          - continuous raw EEG (8 ch x N samples)
     aux_raw.npy          - continuous aux/analog channels (photosensor on ch1)
     trial_metadata.npy   - list of dicts with per-trial info
-    eeg_trials.npy       - epoched EEG (trials × ch × samples), response-locked
+    eeg_trials.npy       - epoched EEG (trials x ch x samples), response-locked
     labels.npy           - per-trial outcome string
 """
 
-# ─────────────────────────────────────────────
-#  CONFIGURATION  — edit these before recording
-# ─────────────────────────────────────────────
+# ---------------------------------------------
+#  CONFIGURATION  -- edit these before recording
+# ---------------------------------------------
 SUBJECT          = 1          # Subject number
 SESSION          = 1          # Session number
 RUN              = 1          # Run number (also used as random seed)
-CYTON_IN         = False       # True = record from OpenBCI Cyton; False = dry run
+CYTON_IN         = False      # True = record from OpenBCI Cyton; False = dry run
 CYTON_BOARD_ID   = 0          # 0 = Cyton (8ch), 2 = Cyton+Daisy (16ch)
-SAMPLING_RATE    = 250        # Hz — must match board setting
+SAMPLING_RATE    = 250        # Hz -- must match board setting
 
-# Display
-SCREEN_WIDTH     = 1536
-SCREEN_HEIGHT    = 864
-REFRESH_RATE     = 60.0       # Hz — adjust to your monitor
+# Display -- MacBook Air 13"
+SCREEN_WIDTH     = 1440       # actual screen resolution (not scaled)
+SCREEN_HEIGHT    = 900
+REFRESH_RATE     = 60.0       # Hz -- adjust to your monitor
 
 # Task timing (all in seconds)
 FIXATION_DURATION  = 0.5      # Duration of fixation cross
@@ -57,24 +57,24 @@ N_GO_TRIALS        = 120      # Number of Go trials per run
 N_NOGO_TRIALS      = 30       # Number of No-Go trials (20% of total = 30/150)
 
 # Epoch window around button press (for offline pre-response analysis)
-EPOCH_PRE_PRESS    = 0.7      # seconds BEFORE press (gives −700 ms buffer; use −500ms offline)
+EPOCH_PRE_PRESS    = 0.7      # seconds BEFORE press (gives -700 ms buffer; use -500ms offline)
 EPOCH_POST_PRESS   = 0.2      # seconds AFTER press
 
 # File paths
 SAVE_DIR = f'data/gonogo/sub-{SUBJECT:02d}/ses-{SESSION:02d}/'
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  IMPORTS
-# ─────────────────────────────────────────────
-import os, random, pickle, time
+# ---------------------------------------------
+import os, random, pickle, time, platform
 import numpy as np
 from psychopy import visual, core, event
 from psychopy.hardware import keyboard as kb
 import mne
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  CYTON / BRAINFLOW SETUP
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 if CYTON_IN:
     import glob, sys, serial
     from brainflow.board_shim import BoardShim, BrainFlowInputParams
@@ -82,8 +82,8 @@ if CYTON_IN:
     from threading import Thread, Event
     from queue import Queue
 
-    BAUD_RATE    = 115200
-    ANALOGUE_MODE = '/2'   # Enables analog reads on A5/A6/A7 — photosensor on A6 (aux ch 1)
+    BAUD_RATE     = 115200
+    ANALOGUE_MODE = '/2'   # Enables analog reads on A5/A6/A7 -- photosensor on A6 (aux ch 1)
 
     def find_openbci_port():
         """Auto-detect the serial port of the OpenBCI Cyton dongle."""
@@ -143,7 +143,7 @@ if CYTON_IN:
     cyton_thread = Thread(target=_get_data_thread, args=(queue_in,), daemon=True)
     cyton_thread.start()
 
-    # Running buffers — data accumulates here throughout the session
+    # Running buffers -- data accumulates here throughout the session
     eeg_buf = np.zeros((8, 0))
     aux_buf = np.zeros((3, 0))
     ts_buf  = np.zeros((0,))
@@ -180,78 +180,67 @@ def save_all_data(trial_metadata, eeg_trials_list, labels_list):
     print(f'       Labels           : {np.unique(labels_list, return_counts=True)}')
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  PSYCHOPY WINDOW  (macOS / Windows compatible)
-# ─────────────────────────────────────────────
-import platform
+# ---------------------------------------------
 IS_MAC = platform.system() == 'Darwin'
 
 win = visual.Window(
     size=[SCREEN_WIDTH, SCREEN_HEIGHT],
     fullscr=True,
-    allowGUI=True,          # MUST be True on macOS to receive keyboard events
+    allowGUI=True,          # must be True on macOS to receive keyboard events
     color=[-0.6, -0.6, -0.6],
     checkTiming=True,
-    useRetina=False,
+    useRetina=True,         # required on all Retina Macs; ignored on non-Retina
 )
 
-# macOS: window must be explicitly brought to front after creation,
-# otherwise the OS routes keyboard events back to the terminal.
+# macOS: bring window to front so keyboard events route here, not to terminal
 if IS_MAC:
     try:
-        win.winHandle.activate()        # pyglet: raise window to foreground
+        win.winHandle.activate()
         win.winHandle.set_mouse_visible(True)
     except Exception:
-        pass  # non-fatal if pyglet handle unavailable
+        pass
 
-# iohub backend is the most reliable on macOS (uses a separate process for input).
-# Falls back to 'event' on Windows/Linux which works fine there.
-try:
-    keyboard = kb.Keyboard(backend='iohub' if IS_MAC else 'event')
-except Exception:
-    keyboard = kb.Keyboard(backend='event')   # iohub fallback if not installed
+# 'event' backend is reliable on all platforms when using a frame-driven
+# getKeys() loop (which we do). iohub requires psutil + a background server
+# and is unnecessary complexity for this setup.
+keyboard = kb.Keyboard(backend='event')
 
 ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  STIMULI DEFINITIONS
-# ─────────────────────────────────────────────
-# Fixation cross
+# ---------------------------------------------
 fixation = visual.TextStim(win, text='+', height=0.12, color='white', units='norm')
 
-# Go stimulus: large green circle
 go_stim = visual.Circle(
     win, radius=0.18, fillColor=[0.0, 0.85, 0.2],
     lineColor=None, units='norm'
 )
 
-# No-Go stimulus: large red circle
 nogo_stim = visual.Circle(
     win, radius=0.18, fillColor=[0.9, 0.1, 0.1],
     lineColor=None, units='norm'
 )
 
-# Instructions text
 instruction_text = visual.TextStim(
     win, wrapWidth=1.6, height=0.07, color='white', units='norm',
     text=(
         "GO / NO-GO TASK\n\n"
-        "GREEN circle  →  Press SPACE as fast as you can\n"
-        "RED circle    →  Do NOT press anything\n\n"
+        "GREEN circle  ->  Press SPACE as fast as you can\n"
+        "RED circle    ->  Do NOT press anything\n\n"
         "Try to respond quickly but accurately.\n\n"
         "Press SPACE to begin."
     )
 )
 
-# Trial counter (bottom centre)
 trial_counter = visual.TextStim(
     win, pos=(0, -0.92), height=0.055, color='grey', units='norm', text=''
 )
 
-# Feedback (brief, shown after each trial for debugging; disable for real sessions)
 feedback_text = visual.TextStim(win, pos=(0, -0.7), height=0.07, units='norm', text='')
 
-# Photosensor dot — bottom-right corner, flashes white at stimulus onset for sync
 photosensor = visual.Rect(
     win, units='norm',
     width=0.08, height=0.08 * ASPECT,
@@ -261,44 +250,37 @@ photosensor = visual.Rect(
 
 
 def show_photosensor(state):
-    """Flash photosensor dot white (state=True) or black (state=False)."""
     photosensor.fillColor = 'white' if state else 'black'
 
 
 def draw_background():
-    """Draw persistent background elements."""
     photosensor.draw()
     trial_counter.draw()
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  TRIAL SEQUENCE
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 def build_trial_sequence(n_go, n_nogo, seed=0):
-    """
-    Returns a shuffled list of trial dicts.
-    Each dict: {'trial_type': 'go'|'nogo', 'iti': float (seconds)}
-    """
     rng = np.random.default_rng(seed)
     trials = [{'trial_type': 'go'}] * n_go + [{'trial_type': 'nogo'}] * n_nogo
     rng.shuffle(trials)
-    # Assign jittered ITIs
     for t in trials:
         t['iti'] = rng.uniform(ITI_MIN, ITI_MAX)
     return trials
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  EPOCH EXTRACTION (response-locked)
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 def extract_response_locked_epoch(press_sample):
     """
     Extract a pre-response-locked EEG epoch centred on the button press.
     Returns epoch of shape (8 channels, n_samples) or None if buffer too short.
 
-    For error prediction, the critical window is -500ms to 0ms before press.
-    We save a wider window (−EPOCH_PRE_PRESS to +EPOCH_POST_PRESS) so
-    you can choose the exact window offline.
+    Critical analysis window offline: -500 ms to 0 ms before press.
+    We save -EPOCH_PRE_PRESS to +EPOCH_POST_PRESS so you can choose the
+    exact window during analysis.
     """
     pre_samples  = int(EPOCH_PRE_PRESS  * SAMPLING_RATE)
     post_samples = int(EPOCH_POST_PRESS * SAMPLING_RATE)
@@ -306,33 +288,30 @@ def extract_response_locked_epoch(press_sample):
     end   = press_sample + post_samples
 
     if start < 0 or end > eeg_buf.shape[1]:
-        return None  # not enough data yet
+        return None
 
-    # Bandpass 1–40 Hz (preserves theta, alpha, beta)
     epoch_raw = eeg_buf[:, start:end].copy()
     epoch_filt = mne.filter.filter_data(
         epoch_raw, sfreq=SAMPLING_RATE, l_freq=1.0, h_freq=40.0, verbose=False
     )
-    # Baseline correction using -EPOCH_PRE_PRESS to -EPOCH_PRE_PRESS+200ms
+    # Baseline correction: mean of first 200 ms
     baseline_end = int(0.2 * SAMPLING_RATE)
     baseline_mean = np.mean(epoch_filt[:, :baseline_end], axis=1, keepdims=True)
     epoch_filt -= baseline_mean
     return epoch_filt
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  MAIN EXPERIMENT LOOP
-# ─────────────────────────────────────────────
-trial_metadata  = []   # list of dicts, one per trial
-eeg_trials_list = []   # epoched EEG per responded trial
-labels_list     = []   # outcome label per responded trial
+# ---------------------------------------------
+trial_metadata  = []
+eeg_trials_list = []
+labels_list     = []
 
-# On macOS: do a blank flip immediately after window creation to force focus transfer.
-# Without this, the first event.waitKeys() can silently time out.
+# Blank flip to force macOS focus transfer before first waitKeys
 win.flip()
 core.wait(0.1)
 
-# Show instructions
 instruction_text.draw()
 win.flip()
 keys = event.waitKeys(keyList=['space', 'escape'])
@@ -352,62 +331,58 @@ for i_trial, trial in enumerate(trial_sequence):
 
     trial_counter.text = f'{i_trial + 1} / {n_trials}'
 
-    # ── ITI: fixation cross ───────────────────
+    # -- ITI: fixation cross --
     fixation.draw()
     show_photosensor(False)
     draw_background()
     win.flip()
     core.wait(iti)
 
-    # ── Stimulus onset ────────────────────────
+    # -- Stimulus onset --
     stim = go_stim if is_go else nogo_stim
-    event.clearEvents()   # flush any stale keypresses before stimulus onset
+    event.clearEvents()   # flush stale keypresses before stimulus onset
 
     stim.draw()
-    show_photosensor(True)    # photosensor ON — marks stimulus onset in aux channel
+    show_photosensor(True)
     draw_background()
     win.flip()
     stim_onset_sample = current_sample_index() if CYTON_IN else None
 
-    # ── Response window (frame-by-frame loop) ─────────────────────────────────
-    # We drive the loop with win.flip() so that the OS event queue is pumped
-    # every ~16 ms. This is far more reliable than waitKeys() on macOS because
-    # the pyglet event dispatcher only fires during flip — keypresses between
-    # flips get buffered and are always caught on the very next frame check.
+    # -- Response window (frame-by-frame loop) --
+    # Driving with win.flip() every ~16 ms pumps the OS event queue continuously.
+    # getKeys() after each flip catches every press with <16 ms latency.
     #
     # Timeline:
-    #   0 ms ─ stimulus appears (above)
-    #   0–250 ms ─ stimulus visible, already listening for keypress
-    #   250 ms ─ stimulus disappears, keep listening until RESPONSE_WINDOW
-    #   600 ms ─ response window closes
+    #   0 ms       -- stimulus appears, listening begins
+    #   0-250 ms   -- stimulus visible
+    #   250 ms     -- stimulus disappears, still listening
+    #   600 ms     -- response window closes
     #
-    response_rt   = None
-    press_sample  = None
-    rt_clock      = core.Clock()          # starts ticking from stimulus onset
+    response_rt  = None
+    press_sample = None
+    rt_clock     = core.Clock()   # ticks from stimulus onset flip
 
     n_frames_total = int(RESPONSE_WINDOW * REFRESH_RATE)
     n_frames_stim  = int(STIM_DURATION   * REFRESH_RATE)
 
     for i_frame in range(n_frames_total):
-        # Hide stimulus after its display duration
         if i_frame == n_frames_stim:
+            # First blank frame -- hide stimulus
             show_photosensor(False)
             draw_background()
             win.flip()
-            continue   # no need to redraw stim on blank frames after first blank flip
-
-        if i_frame > n_frames_stim:
-            # Blank ITI frames — just flip to keep the event queue alive
+        elif i_frame > n_frames_stim:
+            # Remaining blank frames -- just flip to keep event queue alive
             draw_background()
             win.flip()
         else:
-            # Stimulus still visible — redraw each frame
+            # Stimulus still visible
             stim.draw()
             show_photosensor(True)
             draw_background()
             win.flip()
 
-        # Check keyboard AFTER flip (event queue is freshest here)
+        # Check keyboard after every flip
         keys = event.getKeys(keyList=['space', 'escape'], timeStamped=rt_clock)
         for key_name, key_rt in keys:
             if key_name == 'escape':
@@ -419,30 +394,22 @@ for i_trial, trial in enumerate(trial_sequence):
                 win.close()
                 core.quit()
             if key_name == 'space' and response_rt is None:
-                response_rt  = key_rt   # seconds from stimulus onset
+                response_rt  = key_rt
                 press_sample = stim_onset_sample + int(response_rt * SAMPLING_RATE) if CYTON_IN else None
-                break   # first press only
 
         if response_rt is not None:
-            break   # stop looping once we have a response
+            break
 
-    # ── Classify outcome ──────────────────────
+    # -- Classify outcome --
     if is_go:
-        if response_rt is not None:
-            outcome = 'hit'
-        else:
-            outcome = 'miss'
+        outcome = 'hit' if response_rt is not None else 'miss'
     else:
-        if response_rt is not None:
-            outcome = 'commission_error'   # ← the key error trials for our classifier
-        else:
-            outcome = 'correct_rejection'
+        outcome = 'commission_error' if response_rt is not None else 'correct_rejection'
 
-    # ── Extract EEG epoch (response-locked) ──
+    # -- Extract EEG epoch (response-locked) --
     epoch = None
     if CYTON_IN and press_sample is not None:
         drain_queue()
-        # Wait briefly for post-press samples to arrive if needed
         needed = press_sample + int(EPOCH_POST_PRESS * SAMPLING_RATE)
         wait_attempts = 0
         while eeg_buf.shape[1] < needed and wait_attempts < 20:
@@ -451,7 +418,6 @@ for i_trial, trial in enumerate(trial_sequence):
             wait_attempts += 1
         epoch = extract_response_locked_epoch(press_sample)
 
-    # Append metadata regardless of whether we got a keypress
     meta = {
         'trial_idx'         : i_trial,
         'trial_type'        : trial_type,
@@ -468,7 +434,7 @@ for i_trial, trial in enumerate(trial_sequence):
         eeg_trials_list.append(epoch)
         labels_list.append(outcome)
 
-    # Brief text feedback (set SHOW_FEEDBACK = False for real recording)
+    # Feedback display (set SHOW_FEEDBACK = False for real EEG recording)
     SHOW_FEEDBACK = True
     if SHOW_FEEDBACK:
         color_map = {
@@ -485,15 +451,13 @@ for i_trial, trial in enumerate(trial_sequence):
         win.flip()
         core.wait(0.25)
 
-    # Print live trial info
     rt_str = f'{response_rt*1000:.0f} ms' if response_rt else '---'
     print(f'Trial {i_trial+1:3d}/{n_trials}  [{trial_type:5s}]  {outcome:<22s}  RT: {rt_str}')
 
 
-# ─────────────────────────────────────────────
-#  END OF RUN — save everything
-# ─────────────────────────────────────────────
-# End screen
+# ---------------------------------------------
+#  END OF RUN
+# ---------------------------------------------
 end_text = visual.TextStim(
     win, height=0.08, color='white', units='norm',
     text="Run complete!\n\nSaving data...\n\nPlease wait."
@@ -507,12 +471,10 @@ if CYTON_IN:
     board.stop_stream()
     board.release_session()
 else:
-    # Dry-run: just print summary
     outcomes = [m['outcome'] for m in trial_metadata]
     for outcome in ['hit', 'miss', 'commission_error', 'correct_rejection']:
         print(f'  {outcome:<22s}: {outcomes.count(outcome)}')
 
-# Summary stats to screen
 hits    = sum(1 for m in trial_metadata if m['outcome'] == 'hit')
 errors  = sum(1 for m in trial_metadata if m['outcome'] == 'commission_error')
 misses  = sum(1 for m in trial_metadata if m['outcome'] == 'miss')
