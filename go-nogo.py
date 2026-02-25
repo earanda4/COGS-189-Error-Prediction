@@ -36,7 +36,7 @@ Data saved per run:
 SUBJECT          = 1          # Subject number
 SESSION          = 1          # Session number
 RUN              = 1          # Run number (also used as random seed)
-CYTON_IN         = True       # True = record from OpenBCI Cyton; False = dry run
+CYTON_IN         = False       # True = record from OpenBCI Cyton; False = dry run
 CYTON_BOARD_ID   = 0          # 0 = Cyton (8ch), 2 = Cyton+Daisy (16ch)
 SAMPLING_RATE    = 250        # Hz — must match board setting
 
