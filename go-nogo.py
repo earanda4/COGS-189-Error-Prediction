@@ -40,10 +40,15 @@ CYTON_IN         = False      # True = record from OpenBCI Cyton; False = dry ru
 CYTON_BOARD_ID   = 0          # 0 = Cyton (8ch), 2 = Cyton+Daisy (16ch)
 SAMPLING_RATE    = 250        # Hz -- must match board setting
 
-# Display -- MacBook Air 13"
+# Display -- Mac 
 SCREEN_WIDTH     = 1440       # actual screen resolution (not scaled)
 SCREEN_HEIGHT    = 900
 REFRESH_RATE     = 60.0       # Hz -- adjust to your monitor
+
+# Display -- Windows
+# SCREEN_WIDTH  = 1920  # change to match the Windows PC screen
+# SCREEN_HEIGHT = 1080
+# REFRESH_RATE  = 60.0  # confirm in Windows Display Settings
 
 # Task timing (all in seconds)
 FIXATION_DURATION  = 0.5      # Duration of fixation cross
