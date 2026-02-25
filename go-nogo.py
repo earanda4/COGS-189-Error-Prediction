@@ -53,8 +53,8 @@ ITI_MIN            = 0.8      # Minimum inter-trial interval
 ITI_MAX            = 1.2      # Maximum inter-trial interval (jittered)
 
 # Trial counts
-N_GO_TRIALS        = 120      # Number of Go trials per run
-N_NOGO_TRIALS      = 30       # Number of No-Go trials (20% of total = 30/150)
+N_GO_TRIALS        = 60      # Number of Go trials per run
+N_NOGO_TRIALS      = 15       # Number of No-Go trials (20% of total = 30/150)
 
 # Epoch window around button press (for offline pre-response analysis)
 EPOCH_PRE_PRESS    = 0.7      # seconds BEFORE press (gives -700 ms buffer; use -500ms offline)
