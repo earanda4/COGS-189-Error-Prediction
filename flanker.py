@@ -1,50 +1,43 @@
 """
-Flanker Task EEG Data Collection Script (Non-Blocking Fix)
-==========================================================
+Flanker Task EEG Data Collection (Mac-Fixed Version)
+====================================================
 Hardware: OpenBCI Cyton 8-channel via BrainFlow.
 Platform: Mac / Windows compatible.
-
-Task Design:
-    - Stimulus: A row of 5 arrows (e.g., <<<<< or >><>>)
-    - Task: Press key corresponding to the CENTER arrow.
-        - Left Center (<)  -> Press 'F'
-        - Right Center (>) -> Press 'J'
-    - Timing:
-        - Stimulus appears for 0.2s
-        - Blank screen for remainder of 1.0s window
-        - You can press the key at ANY time during this 1.0s window.
+Fix: Uses event.getKeys() instead of kb.Keyboard() for better Mac compatibility.
 """
 
 # ---------------------------------------------
 #  CONFIGURATION
 # ---------------------------------------------
-SUBJECT          = 1          # Subject number
-SESSION          = 1          # Session number
-RUN              = 1          # Run number
-CYTON_IN         = True       # True = record; False = dry run
-CYTON_BOARD_ID   = 0          # 0 = Cyton, 2 = Cyton+Daisy
-SAMPLING_RATE    = 250        # Hz
+SUBJECT          = 1          
+SESSION          = 1          
+RUN              = 1          
+CYTON_IN         = False       # Set to True to record!
+CYTON_BOARD_ID   = 0          
+SAMPLING_RATE    = 250        
 
-# Display
-SCREEN_WIDTH     = 1536
-SCREEN_HEIGHT    = 864
-REFRESH_RATE     = 60.0
+# Display -- Mac 
+SCREEN_WIDTH     = 1440       # actual screen resolution (not scaled)
+SCREEN_HEIGHT    = 900
+REFRESH_RATE     = 60.0       # Hz -- adjust to your monitor
+
+# Display -- Windows
+# SCREEN_WIDTH  = 1920  # change to match the Windows PC screen
+# SCREEN_HEIGHT = 1080
+# REFRESH_RATE  = 60.0  # confirm in Windows Display Settings
 
 # Task timing (seconds)
-STIM_DURATION      = 0.2      # How long arrow is visible
-RESPONSE_WINDOW    = 1.0      # Total time to respond (Stim + Blank)
-ITI_MIN            = 0.8      # Random pause between trials
+STIM_DURATION      = 0.2      
+RESPONSE_WINDOW    = 1.0      
+ITI_MIN            = 0.8      
 ITI_MAX            = 1.2
 
-# Trial counts
-N_CONGRUENT        = 75       # 50%
-N_INCONGRUENT      = 75       # 50% 
+N_CONGRUENT        = 75       
+N_INCONGRUENT      = 75       
 
-# Epoch window (Response-Locked)
 EPOCH_PRE_PRESS    = 0.7      
 EPOCH_POST_PRESS   = 0.2     
 
-# File paths
 SAVE_DIR = f'data/flanker/sub-{SUBJECT:02d}/ses-{SESSION:02d}/'
 
 # ---------------------------------------------
@@ -52,8 +45,7 @@ SAVE_DIR = f'data/flanker/sub-{SUBJECT:02d}/ses-{SESSION:02d}/'
 # ---------------------------------------------
 import os, random, time, sys, glob
 import numpy as np
-from psychopy import visual, core, event
-from psychopy.hardware import keyboard as kb
+from psychopy import visual, core, event # event is the key library here
 import mne
 
 # ---------------------------------------------
@@ -118,7 +110,7 @@ if CYTON_IN:
                 eeg = data[board.get_eeg_channels(CYTON_BOARD_ID)]
                 aux = data[board.get_analog_channels(CYTON_BOARD_ID)]
                 q.put((eeg, aux, ts))
-            time.sleep(0.005) # Fast polling
+            time.sleep(0.005)
 
     cyton_thread = Thread(target=_get_data_thread, args=(queue_in,), daemon=True)
     cyton_thread.start()
@@ -153,7 +145,6 @@ def save_all_data(trial_metadata, eeg_trials_list, labels_list):
 # ---------------------------------------------
 #  PSYCHOPY WINDOW
 # ---------------------------------------------
-keyboard = kb.Keyboard()
 win = visual.Window(
     size=[SCREEN_WIDTH, SCREEN_HEIGHT],
     fullscr=True,
@@ -175,9 +166,6 @@ instruction_text = visual.TextStim(
         "Look at the CENTER arrow.\n\n"
         "<  ->  Press 'F' (Left)\n"
         ">  ->  Press 'J' (Right)\n\n"
-        "Examples:\n"
-        "<<<<<  (Press F)\n"
-        ">><>>  (Press F)\n\n"
         "Press SPACE to begin."
     )
 )
@@ -194,7 +182,7 @@ def draw_screen():
     trial_counter.draw()
 
 # ---------------------------------------------
-#  LOGIC & SEQUENCE
+#  SEQUENCE
 # ---------------------------------------------
 def build_trial_sequence(n_con, n_inc, seed=0):
     rng = np.random.default_rng(seed)
@@ -250,58 +238,59 @@ print(f'[TASK] Run {RUN}: {n_trials} trials')
 for i, trial in enumerate(sequence):
     trial_counter.text = f'{i+1}/{n_trials}'
     
-    # 1. ITI (Inter-Trial Interval)
+    # 1. ITI
     fixation.draw()
     show_photosensor(False)
     draw_screen()
     win.flip()
     core.wait(trial['iti'])
     
-    # 2. TRIAL EXECUTION (Non-blocking Loop)
-    # --------------------------------------
+    # 2. TRIAL EXECUTION
+    # ------------------
     stim_onset = current_sample_index()
-    trial_clock = core.Clock() # Reset clock 0.00s
+    event.clearEvents() # Clear any old key presses
+    trial_clock = core.Clock() 
     
     resp_key = None
     rt = None
     press_sample = None
     
-    # Constant loop for the duration of RESPONSE_WINDOW
+    # Loop for RESPONSE_WINDOW (1.0s)
     while trial_clock.getTime() < RESPONSE_WINDOW:
         
-        # A. Draw Logic (What should be on screen?)
+        # A. Visuals
         if trial_clock.getTime() < STIM_DURATION:
             stim_text.text = trial['stim']
             stim_text.draw()
-            show_photosensor(True) # Sync marker ON
+            show_photosensor(True) 
         else:
             stim_text.text = '' 
-            show_photosensor(False) # Sync marker OFF
+            show_photosensor(False) 
             
         draw_screen()
-        win.flip() # Refresh screen (Approx every 16.7ms)
+        win.flip() 
         
-        # B. Key Logic (Did you press something?)
-        keys = keyboard.getKeys(keyList=['f', 'j', 'escape'], waitRelease=False)
+        # B. Inputs (Legacy 'event' method - robust on Mac)
+        keys = event.getKeys(keyList=['f', 'j', 'escape'])
         
-        for k in keys:
-            if k.name == 'escape':
+        if keys:
+            # Grab the first key pressed
+            k = keys[0] 
+            
+            if k == 'escape':
                 if CYTON_IN:
                     stop_event.set()
                     board.stop_stream()
-                    board.release_session()
                 win.close()
                 core.quit()
             
-            # Record ONLY the first keypress
+            # Save only first response
             if resp_key is None:
-                resp_key = k.name
-                rt = k.rt
+                resp_key = k
+                rt = trial_clock.getTime()
                 press_sample = stim_onset + int(rt * SAMPLING_RATE)
-                # Optional: Break loop immediately after response?
-                # No, better to keep timing consistent (fixed pace).
                 
-    # 3. Classify Outcome
+    # 3. Outcome
     outcome = ''
     if resp_key is None:
         outcome = 'miss'
@@ -310,8 +299,7 @@ for i, trial in enumerate(sequence):
     else:
         outcome = 'error' 
         
-    # 4. Extract Epoch
-    epoch = None
+    # 4. Save Epoch
     if CYTON_IN and press_sample is not None:
         drain_queue()
         needed = press_sample + int(EPOCH_POST_PRESS * SAMPLING_RATE)
@@ -320,7 +308,6 @@ for i, trial in enumerate(sequence):
             time.sleep(0.01)
             drain_queue()
             timeout += 1
-            
         epoch = extract_response_locked_epoch(press_sample)
         if epoch is not None:
             eeg_trials.append(epoch)
@@ -328,13 +315,8 @@ for i, trial in enumerate(sequence):
             
     # Metadata
     trial_metadata.append({
-        'idx': i,
-        'cond': trial['cond'],
-        'stim': trial['stim'],
-        'ans': trial['ans'],
-        'resp': resp_key,
-        'outcome': outcome,
-        'rt': rt
+        'idx': i, 'cond': trial['cond'], 'stim': trial['stim'],
+        'ans': trial['ans'], 'resp': resp_key, 'outcome': outcome, 'rt': rt
     })
     
     # Feedback
