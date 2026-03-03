@@ -1,9 +1,14 @@
 """
-Flanker Task EEG Data Collection (Mac-Fixed Version)
+Gemini-Assisted Script
+
+Took Simon's SSVEP script and asked Gemini to replace the Speller with the Flanker task. 
+
+Uncomment Windows Display and Comment Mac Display for Lab Computers
+
+Flanker Task EEG Data Collection 
 ====================================================
 Hardware: OpenBCI Cyton 8-channel via BrainFlow.
 Platform: Mac / Windows compatible.
-Fix: Uses event.getKeys() instead of kb.Keyboard() for better Mac compatibility.
 """
 
 # ---------------------------------------------
@@ -32,8 +37,8 @@ RESPONSE_WINDOW    = 1.0
 ITI_MIN            = 0.8      
 ITI_MAX            = 1.2
 
-N_CONGRUENT        = 75       
-N_INCONGRUENT      = 75       
+N_CONGRUENT        = 25       
+N_INCONGRUENT      = 25       
 
 EPOCH_PRE_PRESS    = 0.7      
 EPOCH_POST_PRESS   = 0.2     
